@@ -441,7 +441,7 @@ if [ -n "$PR_NUM" ]; then
   esac
   seg "$DOT_SEP" 0 "${label}${st:+ $st}"
 fi
-[ "${ADDED_DIRS:-0}" -gt 0 ] && seg "$DOT_SEP" 3 "${DIM}+${ADDED_DIRS} dir${RESET}"
+[ "${ADDED_DIRS:-0}" -gt 0 ] && seg "$DOT_SEP" 4 "${DIM}+${ADDED_DIRS} dir${RESET}"
 # Other live sessions launched from this project (from the registry above).
 if [ "${N_HERE:-0}" -gt 0 ]; then
   seg "$DOT_SEP" 0 "${YELLOW}$((N_HERE + 1)) sessions here${RESET}"

@@ -89,8 +89,8 @@ session now leaves a card, and each reads the others.
 - `⚠ context 657k — each request re-reads all of it; /clear at the next task boundary`
 
 Lines 2 and 3 are trimmed to the terminal width by priority: the least
-important segments (miss causes, other sessions' names, `+N dir`, `last`,
-`$/h`, session name) drop first, whole. Branch, total cost and a cold cache
+important segments (`+N dir` and miss causes, then other sessions' names,
+`last` and `$/h`, then the session name and TTL) drop first, whole. Branch, total cost and a cold cache
 are never dropped. Lines 1 and 4 are not trimmed; under about 85 columns
 they wrap.
 

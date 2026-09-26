@@ -1,4 +1,4 @@
 [Fable 5.1 · high] | 5h 9%→21:10 · 7d 58%→Tue dry~Tue 15h early
 █░░░░░░░░░ 12% 880k left | $38.51 1h30m | +346/−11
-+1 dir · Card redesign v2 copyfit | cache 98% req 99% ttl59m
+Card redesign v2 copyfit | cache 98% req 99% ttl59m
 🔒 run · RE dry run: comparison card until 17:26 — no container recreate
