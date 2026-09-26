@@ -13,7 +13,7 @@ done
 S="$DST/settings.json"
 [ -f "$S" ] || echo '{}' > "$S"
 cp "$S" "$S.bak-$stamp"
-jq '.statusLine = {type:"command", command:"~/.claude/statusline.sh", refreshInterval:60}
+jq '.statusLine = {type:"command", command:"~/.claude/statusline.sh", refreshInterval:60, hideVimModeIndicator:true}
   | .subagentStatusLine = {type:"command", command:"~/.claude/subagent-statusline.sh"}' "$S" > "$S.tmp" && mv "$S.tmp" "$S"
 echo "installed. Backups: *.bak-$stamp. Open a new Claude Code session, or wait for the next refresh."
 echo "optional: put an executable at ~/.claude/statusline-health.sh (see README)."

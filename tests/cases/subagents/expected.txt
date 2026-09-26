@@ -1,0 +1,3 @@
+{"id":"a1","content":"Map comment pipeline + observab… - haiku 4.5·low - 154k \u001b[33m(77%)\u001b[0m - 10m50s - running"}
+{"id":"a2","content":"Review diff - opus 5.5 - 181k \u001b[31m(90%)\u001b[0m - 1h1m - running \u001b[33mstalled?\u001b[0m"}
+{"id":"a3","content":"Run golden suites - sonnet 5 - 9k (0%) - 59s - completed"}

@@ -1,0 +1,75 @@
+{
+  "session_id": "s-cold",
+  "session_name": "Long refactor",
+  "cwd": "/",
+  "workspace": {
+    "current_dir": "/",
+    "project_dir": "/",
+    "added_dirs": []
+  },
+  "model": {
+    "id": "claude-opus-5-5",
+    "display_name": "Opus 5.5"
+  },
+  "effort": {
+    "level": "max"
+  },
+  "fast_mode": true,
+  "thinking": {
+    "enabled": false
+  },
+  "cost": {
+    "total_cost_usd": 212.4,
+    "total_duration_ms": 36000000,
+    "total_api_duration_ms": 9000000,
+    "total_lines_added": 2100,
+    "total_lines_removed": 900
+  },
+  "context_window": {
+    "total_input_tokens": 320000,
+    "total_output_tokens": 400,
+    "context_window_size": 1000000,
+    "used_percentage": 32,
+    "remaining_percentage": 68,
+    "current_usage": {
+      "input_tokens": 300000,
+      "output_tokens": 400,
+      "cache_creation_input_tokens": 20000,
+      "cache_read_input_tokens": 0
+    }
+  },
+  "exceeds_200k_tokens": true,
+  "prompt_cache": {
+    "warm": false,
+    "caching_observed": true,
+    "ttl": "1h",
+    "expires_at": null,
+    "requests": 900,
+    "misses": 9,
+    "expected_rebuilds": 2,
+    "hit_ratio": 0.91,
+    "cache_write_tokens": 3000000,
+    "miss_recache_tokens": 1900000,
+    "last_miss_at": 1790439900,
+    "last_miss_cause": {
+      "causes": [
+        "model_changed"
+      ]
+    },
+    "miss_causes": {
+      "model_changed": 5,
+      "ttl_expired_1h": 4
+    },
+    "recache_tokens_if_cold": 320000
+  },
+  "rate_limits": {
+    "five_hour": {
+      "used_percentage": 91,
+      "resets_at": 1790443000
+    },
+    "seven_day": {
+      "used_percentage": 90,
+      "resets_at": 1790530000
+    }
+  }
+}

@@ -1,0 +1,21 @@
+sid=other-here
+pid=PID
+name=Commenting workflow analysis and humanness
+model=Opus 5.5
+project=/
+cost=3
+hour_spend=4.10
+five_h=9
+seven_d=58
+updated=1790440000
+
+sid=other-elsewhere
+pid=PID
+name=
+model=Sonnet 5
+project=/elsewhere
+cost=3
+hour_spend=2.50
+five_h=9
+seven_d=58
+updated=1790440000

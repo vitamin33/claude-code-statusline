@@ -1,0 +1,12 @@
+name: tests
+on: [push, pull_request]
+jobs:
+  golden:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash -n statusline.sh && bash -n subagent-statusline.sh
+      - run: tests/run.sh

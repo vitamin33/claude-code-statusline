@@ -1,0 +1,4 @@
+[Opus 5.5 · max ⚡ no-thinking] | 5h 91%→17:16 ⚠dry~16:51 · 7d 90%→Sun ⚠dry~Sun 08:20 9h early
+███░░░░░░░ 32% 680k left >200k | $212.40 api 2h30m/10h00m | +2100/−900
+Long refactor | cache ❄ cold · next msg ≈$3.20 (model_changed)
+model switch at 320k re-caches everything ≈$3 — /clear first if the task allows

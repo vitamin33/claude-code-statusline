@@ -4,13 +4,13 @@
 # dim clock that only renders when the terminal is wide enough to keep that room.
 #   line 1: model/effort · 5h/7d limits · optional health hook · clock
 #   line 2: context bar · cost/duration · diff size · cache state
-#   line 3: where the work is — branch/dirty, worktree, agent, PR, session
-#   line 4: only when something needs attention
+#   line 3: where the work is — branch/dirty, worktree, agent, PR, other sessions, session name
+#   line 4: only when something needs attention (run lock, model switch, limits, context)
 input=$(cat)
 
 CYAN='\033[36m'; GREEN='\033[32m'; YELLOW='\033[33m'; RED='\033[31m'; MAGENTA='\033[35m'
 DIM='\033[2m'; RESET='\033[0m'
-NOW=$(date +%s)
+NOW=${STATUSLINE_NOW:-$(date +%s)}   # tests freeze the clock
 
 # macOS/Linux shims: file mtime, md5 of stdin, and "format this epoch"
 if [ "$(uname)" = "Darwin" ]; then
@@ -41,6 +41,10 @@ eval "$(echo "$input" | jq -r '
   @sh "HAS_RL=\(if .rate_limits then "1" else "" end)",
   @sh "EFFORT=\(.effort.level // "")",
   @sh "FAST=\(.fast_mode | b)",
+  @sh "THINKING=\(.thinking.enabled | b)",
+  @sh "ADDED_DIRS=\((.workspace.added_dirs // []) | length)",
+  @sh "CACHE_TTL=\(.prompt_cache.ttl // "")",
+  @sh "MISS_RECACHE=\(.prompt_cache.miss_recache_tokens | n)",
   @sh "PCT=\((.context_window.used_percentage // 0) | floor)",
   @sh "TOTAL_IN=\(.context_window.total_input_tokens // 0)",
   @sh "CTX_SIZE=\(.context_window.context_window_size // 200000)",
@@ -77,7 +81,7 @@ eval "$(echo "$input" | jq -r '
   @sh "PROJECT_DIR=\(.workspace.project_dir // .cwd // "")"
 ')"
 # jq emits floats for some counters ("12.0"); every integer test below needs ints
-for v in PCT TOTAL_IN CTX_SIZE DURATION_MS API_MS CUR_IN CUR_CREATE CUR_READ MISSES SEVEN_D_RESET LINES_ADD LINES_DEL CACHE_EXPIRES RECACHE_TOKENS LAST_MISS_AT FIVE_H_RESET; do
+for v in PCT TOTAL_IN CTX_SIZE DURATION_MS API_MS CUR_IN CUR_CREATE CUR_READ MISSES SEVEN_D_RESET LINES_ADD LINES_DEL CACHE_EXPIRES RECACHE_TOKENS LAST_MISS_AT FIVE_H_RESET MISS_RECACHE ADDED_DIRS; do
   eval "val=\$$v"; [ -n "$val" ] && eval "$v=\${val%%.*}"
 done
 
@@ -124,11 +128,15 @@ input_price() {
   esac
 }
 
+# Cache writes bill above base input: 2x for the 1h TTL, 1.25x for 5m.
+WRITE_MULT=2; [ "$CACHE_TTL" = "5m" ] && WRITE_MULT=1.25
+
 # Prune per-session logs older than 7 days, at most once an hour.
 STAMP="$CACHE_DIR/.statusline_prune"
 if [ ! -f "$STAMP" ] || [ $(( NOW - $(mtime "$STAMP") )) -gt 3600 ]; then
   touch "$STAMP"
   find "$CACHE_DIR/statusline_cost" "$CACHE_DIR/statusline_git" -type f -mtime +7 -delete 2>/dev/null
+  find "$CACHE_DIR/statusline_sessions" -type f -mtime +1 -delete 2>/dev/null
 fi
 
 # Rate limits are missing in some sessions. Keep the latest raw input of each
@@ -169,6 +177,7 @@ fi
 LINE1="${CYAN}[$MODEL"
 [ -n "$EFFORT" ] && LINE1="$LINE1 ${DIM}·${RESET}${CYAN} $EFFORT"
 [ "$FAST" = "true" ] && LINE1="$LINE1 ⚡"
+[ "$THINKING" = "false" ] && LINE1="$LINE1 ${YELLOW}no-thinking${RESET}${CYAN}"
 LINE1="${LINE1}]${RESET}"
 
 if [ -n "$FIVE_H" ]; then
@@ -177,6 +186,8 @@ if [ -n "$FIVE_H" ]; then
   LINE1="$LINE1 | ${c}5h ${fh}%${RESET}"
   if [ -n "$FIVE_H_RESET" ]; then
     reset_hhmm=$(date_at "$FIVE_H_RESET" +%H:%M 2>/dev/null)
+    # a reset past midnight reads as "this morning" without the day
+    [ "$(date_at "$FIVE_H_RESET" +%j 2>/dev/null)" != "$(date_at "$NOW" +%j)" ] && reset_hhmm="$(date_at "$FIVE_H_RESET" +%a) $reset_hhmm"
     [ -n "$reset_hhmm" ] && LINE1="$LINE1${DIM}→${reset_hhmm}${RESET}"
 
     DRY_AT=$(dry_at "$FIVE_H" "$FIVE_H_RESET" 18000)
@@ -197,17 +208,31 @@ fi
 # it like the 5h window; the day of the week is what matters at this scale.
 if [ -n "$SEVEN_D" ]; then
   sd=$(printf '%.0f' "$SEVEN_D")
+  # Rate limits are account-wide, so one log serves every session. A session
+  # only learns the figure from its own API responses, so an idle one reports
+  # a stale, lower number: within one window usage only rises, so log a row
+  # only when it exceeds the last row of the same window. Not rendered yet;
+  # it exists so a burn-rate forecast can be backtested before it is trusted.
+  RLOG="$CACHE_DIR/statusline_ratelimit.log"
+  read -r _ last_sd last_reset _ <<<"$(tail -n 1 "$RLOG" 2>/dev/null)"
+  if [ "${last_reset:-0}" != "${SEVEN_D_RESET:-0}" ] || [ "$sd" -gt "${last_sd:-0}" ] 2>/dev/null; then
+    echo "$NOW $sd ${SEVEN_D_RESET:-0} ${FIVE_H:-0} ${FIVE_H_RESET:-0}" >> "$RLOG"
+  fi
+  [ "$(wc -l < "$RLOG" 2>/dev/null || echo 0)" -gt 3000 ] && tail -n 2000 "$RLOG" > "$RLOG.tmp" && mv "$RLOG.tmp" "$RLOG"
   if [ "$sd" -ge 30 ]; then
     c=$(color_for_pct "$sd")
-    LINE1="$LINE1 ${c}7d ${sd}%${RESET}"
+    LINE1="$LINE1 ${DIM}·${RESET} ${c}7d ${sd}%${RESET}"
     if [ -n "$SEVEN_D_RESET" ]; then
       LINE1="$LINE1${DIM}→$(date_at "$SEVEN_D_RESET" +%a 2>/dev/null)${RESET}"
       DRY7=$(dry_at "$SEVEN_D" "$SEVEN_D_RESET" 604800)
       if [ -n "$DRY7" ]; then
+        # running dry before the reset is a lockout of that many hours: worse
+        # than any 5h dip, so it is never dim. Red once it is under a day away.
+        early_h=$(( (SEVEN_D_RESET - DRY7) / 3600 ))
         if [ $(( (DRY7 - NOW) / 3600 )) -lt 24 ]; then
-          LINE1="$LINE1 ${RED}⚠dry~$(date_at "$DRY7" +%a\ %H:%M)${RESET}"
+          LINE1="$LINE1 ${RED}⚠dry~$(date_at "$DRY7" +%a\ %H:%M) ${early_h}h early${RESET}"
         else
-          LINE1="$LINE1 ${DIM}dry~$(date_at "$DRY7" +%a)${RESET}"
+          LINE1="$LINE1 ${YELLOW}dry~$(date_at "$DRY7" +%a) ${early_h}h early${RESET}"
         fi
       fi
     fi
@@ -218,7 +243,7 @@ fi
 # Right side: vim mode + clock, kept clear of the notification area. Claude Code
 # sets COLUMNS for us (tput cannot see the terminal from here). Reserve 45 cols
 # for notifications; skip entirely on narrow terminals rather than collide.
-RIGHT="$(date +%H:%M)"
+RIGHT="$(date_at "$NOW" +%H:%M)"
 [ -n "$VIM_MODE" ] && RIGHT="$VIM_MODE $RIGHT"
 COLS=${COLUMNS:-0}
 if [ "$COLS" -ge 110 ]; then
@@ -332,6 +357,50 @@ fi
 if [ "$LINES_ADD" -gt 0 ] || [ "$LINES_DEL" -gt 0 ]; then
   seg "$BAR_SEP" 2 "${GREEN}+${LINES_ADD}${RESET}/${RED}−${LINES_DEL}${RESET}"
 fi
+LINE2_SEG_T=("${SEG_T[@]}"); LINE2_SEG_P=("${SEG_P[@]}"); LINE2_SEG_S=("${SEG_S[@]}")
+
+# --- session registry ----------------------------------------------------------
+# Every run leaves a card for this session. Other sessions read the cards to
+# name who else is on this checkout, and to sum the burn across the account:
+# the 5h/7d limits are shared, yet each session only sees its own spend.
+# Liveness is the Claude Code pid on the card (kill -0), not file age.
+REG="$CACHE_DIR/statusline_sessions"; mkdir -p "$REG"
+N_LIVE=0; N_HERE=0; ACCT_HOUR=""; HERE_NAMES=""
+if [ -n "$SESSION_ID" ]; then
+  CARD="$REG/$SESSION_ID.card"
+  SELF_PID=$(sed -n 's/^pid=//p' "$CARD" 2>/dev/null)
+  if [ -z "$SELF_PID" ]; then
+    # nearest ancestor whose command is claude; found once, then kept on the card
+    pp=$$
+    for _ in 1 2 3 4 5 6; do
+      pp=$(ps -o ppid= -p "$pp" 2>/dev/null | tr -d ' '); [ -z "$pp" ] || [ "$pp" -le 1 ] && break
+      case "$(ps -o comm= -p "$pp" 2>/dev/null)" in */claude*|claude*) SELF_PID=$pp; break ;; esac
+    done
+  fi
+  ( umask 077; printf 'sid=%s\npid=%s\nname=%s\nmodel=%s\nproject=%s\ncost=%s\nhour_spend=%s\nfive_h=%s\nseven_d=%s\nupdated=%s\n' \
+      "$SESSION_ID" "$SELF_PID" "$SESSION_NAME" "$MODEL" "$PROJECT_DIR" "$COST" "${HOUR_SPEND:-0}" "$FIVE_H" "$SEVEN_D" "$NOW" > "$CARD.tmp" && mv "$CARD.tmp" "$CARD" )
+  live=()
+  for card in "$REG"/*.card; do
+    [ -f "$card" ] || continue
+    cpid=$(sed -n 's/^pid=//p' "$card")
+    if [ -n "$cpid" ]; then kill -0 "$cpid" 2>/dev/null || { rm -f "$card"; continue; }
+    elif [ $(( NOW - $(mtime "$card") )) -gt 180 ]; then rm -f "$card"; continue; fi
+    live+=("$card")
+  done
+  IFS=$'\t' read -r stats HERE_NAMES <<<"$(awk -v me="$SESSION_ID" -v proj="$PROJECT_DIR" '
+    function flush() { n++; hs += r["hour_spend"]
+      if (r["project"] == proj && r["sid"] != me) { o++; nm = r["name"] == "" ? r["model"] : r["name"]
+        names = names (names == "" ? "" : ", ") (length(nm) > 24 ? substr(nm, 1, 23) "…" : nm) } }
+    FNR == 1 && NR > 1 { flush(); delete r }
+    { i = index($0, "="); r[substr($0, 1, i - 1)] = substr($0, i + 1) }
+    END { if (NR) flush(); printf "%d %d %.2f\t%s\n", n, o, hs, names }' "${live[@]}")"
+  read -r N_LIVE N_HERE ACCT_HOUR <<<"$stats"
+fi
+# line 2 renders now, with the account-wide burn when more than one session is live
+SEG_T=("${LINE2_SEG_T[@]}"); SEG_P=("${LINE2_SEG_P[@]}"); SEG_S=("${LINE2_SEG_S[@]}")
+if [ "${N_LIVE:-0}" -gt 1 ] && [ -n "$ACCT_HOUR" ] && [ "${ACCT_HOUR%.*}" != "0" ]; then
+  seg "$DOT_SEP" 2 "${DIM}acct \$${ACCT_HOUR%.*}/h · ${N_LIVE} sessions${RESET}"
+fi
 render_segs
 
 # --- line 3: where the work is + cache -----------------------------------------
@@ -372,6 +441,12 @@ if [ -n "$PR_NUM" ]; then
   esac
   seg "$DOT_SEP" 0 "${label}${st:+ $st}"
 fi
+[ "${ADDED_DIRS:-0}" -gt 0 ] && seg "$DOT_SEP" 3 "${DIM}+${ADDED_DIRS} dir${RESET}"
+# Other live sessions launched from this project (from the registry above).
+if [ "${N_HERE:-0}" -gt 0 ]; then
+  seg "$DOT_SEP" 0 "${YELLOW}$((N_HERE + 1)) sessions here${RESET}"
+  [ -n "$HERE_NAMES" ] && seg " " 3 "${DIM}(${HERE_NAMES})${RESET}"
+fi
 if [ -n "$SESSION_NAME" ]; then
   sn="$SESSION_NAME"
   [ ${#sn} -gt 40 ] && sn="${sn:0:39}…"
@@ -384,9 +459,7 @@ if [ "$CACHE_WARM" = "false" ] && [ "$CACHE_OBSERVED" = "true" ] && [ -n "$RECAC
   price=$(input_price "$MODEL_ID")
   cold="${YELLOW}cache ❄ cold"
   if [ -n "$price" ]; then
-    # 1h TTL writes bill at 2x base input, 5m writes at 1.25x
-    mult=2; case "$LAST_MISS_CAUSE" in *5m*) mult=1.25 ;; esac
-    cold="$cold · next msg ≈\$$(awk -v t="$RECACHE_TOKENS" -v p="$price" -v m="$mult" 'BEGIN{printf "%.2f", t * p * m / 1000000}')"
+    cold="$cold · next msg ≈\$$(awk -v t="$RECACHE_TOKENS" -v p="$price" -v m="$WRITE_MULT" 'BEGIN{printf "%.2f", t * p * m / 1000000}')"
   fi
   seg "$BAR_SEP" 0 "${cold}${RESET}"
   [ -n "$LAST_MISS_CAUSE" ] && seg " " 4 "${DIM}(${LAST_MISS_CAUSE})${RESET}"
@@ -414,7 +487,14 @@ elif [ -n "$HIT_RATIO" ]; then
   if [ -n "$LAST_MISS_AT" ] && [ -n "$LAST_MISS_CAUSE" ] && [ $(( NOW - LAST_MISS_AT )) -lt 120 ]; then
     seg " " 3 "${YELLOW}miss:${LAST_MISS_CAUSE}${RESET}"
   fi
-  [ "$MISSES" -gt 0 ] && seg "$DOT_SEP" 4 "${DIM}${MISSES} miss (${MISS_CAUSES})${RESET}"
+  if [ "$MISSES" -gt 0 ]; then
+    # what the misses cost to re-cache: tokens re-written × the write rate
+    miss_usd=""; price=$(input_price "$MODEL_ID")
+    if [ -n "$price" ] && [ -n "$MISS_RECACHE" ] && [ "$MISS_RECACHE" -gt 0 ]; then
+      miss_usd=" ≈\$$(awk -v t="$MISS_RECACHE" -v p="$price" -v m="$WRITE_MULT" 'BEGIN{printf "%.0f", t * p * m / 1000000}')"
+    fi
+    seg "$DOT_SEP" 4 "${DIM}${MISSES} miss${miss_usd} (${MISS_CAUSES})${RESET}"
+  fi
 fi
 render_segs
 
@@ -426,6 +506,18 @@ if [ "$TOTAL_IN" -ge 300000 ] && [ -n "$LAST_MISS_AT" ] && [ $(( NOW - LAST_MISS
   price=$(input_price "$MODEL_ID")
   est=""; [ -n "$price" ] && est=" ≈\$$(awk -v t="$TOTAL_IN" -v p="$price" 'BEGIN{printf "%.0f", t * p * 2 / 1000000}')"
   WARN="${YELLOW}model switch at $((TOTAL_IN / 1000))k re-caches everything${est} — /clear first if the task allows${RESET}"
+fi
+# An unexpired run lock (ops/run_lock.sh convention: .claude/run-locks/<name>.lock
+# with expires_epoch= and what=) means a container recreate would kill a run.
+if [ -z "$WARN" ] && [ -n "$PROJECT_DIR" ] && [ -d "$PROJECT_DIR/.claude/run-locks" ] && ! { [ -n "$FIVE_H" ] && [ "$(printf '%.0f' "$FIVE_H")" -ge 85 ]; }; then
+  for lf in "$PROJECT_DIR"/.claude/run-locks/*.lock; do
+    [ -f "$lf" ] || continue
+    exp=$(sed -n 's/^expires_epoch=//p' "$lf"); what=$(sed -n 's/^what=//p' "$lf")
+    if [ -n "$exp" ] && [ "$exp" -gt "$NOW" ] 2>/dev/null; then
+      WARN="${YELLOW}🔒 $(basename "$lf" .lock)${what:+ · $what} until $(date_at "$exp" +%H:%M) — no container recreate${RESET}"
+      break
+    fi
+  done
 fi
 if [ -n "$WARN" ]; then :
 elif [ -n "$FIVE_H" ] && [ "$(printf '%.0f' "$FIVE_H")" -ge 85 ]; then
